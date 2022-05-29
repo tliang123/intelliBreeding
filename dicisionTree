@@ -1,0 +1,439 @@
+class DecisionTreeClassifier:
+    def __init__(self, type, epsilon=1e-6):
+        self.type = type            # C4.5, CART
+        self.tree = None            # root
+        self.dict = {}              # dict form
+        self.fang = 0
+        self.fea_num = 0
+        self.num = 0
+
+    def get_num_leaves(self, node): #得到树叶的数量
+        
+        #基线条件
+        if node.is_leaf: #判断是否为叶节点
+            return 1 #是，返回1
+        
+        #递归条件
+        n_leaves = 0 #初始化叶子
+        for attr, child_node in node.children.items(): #从该节点的子节点得到属性和节点
+            n_leaves += self.get_num_leaves(child_node) #如果不是叶节点就接着找
+        return n_leaves #返回叶子的数量
+
+    
+    def get_emp_ent(self, node, data): #得到信息增益
+        split_list = []  #属性列表
+        while node.parent != None: #当节点属于根节点时
+            parent_node = node.parent #定义父节点
+            for k, v in parent_node.children.items(): #得到自己的节点
+                if v == node:
+                    split_list.append([parent_node.attr_split, k])
+            node = parent_node
+
+        while len(split_list) > 0:
+            attr, val = split_list[-1] #特征，特征值
+            data = data[data[attr] == val] #符合条件的数据
+            split_list.pop() #删除
+        return getEnt(data['FLAG']) #返回经验熵
+
+    def get_C45_best_feature(self, data):
+        n_features = data.shape[1] - 1   #所有特征 = 所有列的数量-1（标签列）
+        best_feature = -1 #初始化特征值
+        best_info_gain_ratio = 0.0 #结束的阈值
+        for i in range(n_features): #遍历所有特征，数
+            feature = list(data)[i] #得到所有特征
+            if feature == 'FLAG': #特征标签除外
+                continue
+            if len(set(data[feature])) == 1: #如果改特征的取值只有1个
+                info_gain_ratio = 0 #信息增益比等于0
+            else:
+                info_gain_ratio = getInfoGainRatio(data, feature) #得到信息增益比
+            if info_gain_ratio > best_info_gain_ratio:
+                best_info_gain_ratio = info_gain_ratio
+                best_feature = feature
+        if best_info_gain_ratio > self.epsilon: #如果最好的增益比设定的还要好，则返回
+            return best_feature, best_info_gain_ratio
+        else:
+            return -1, None #反之返回无
+
+    def get_CART_best_feature(self, data): #得到CART的特征
+        n_features = data.shape[1] - 1 #所有特征 = 所有列的数量-1（标签列）
+        best_feature = -1 #初始化特征值
+        best_feature_val = None #最好的特征值
+        best_gini = 1e6 #初始化gini系数
+        for i in range(n_features): #遍历所有特征长度
+            
+            feature = list(data)[i] #得到相应的特征
+            if feature == 'FLAG': #如果特征等于标签，继续 
+                continue
+            feature_prob = data[feature].value_counts(normalize=True) #特征里面不同值的比例
+            feature_vals = feature_prob.index.sort_values() #得到特征里面的值，且进行排序
+            if len(feature_vals) == None: #如果特征值为1，继续
+                continue
+            # elif len(feature_vals) <= 10:
+            #     pass
+            # else:
+            #     feature_vals = list(range(0,11))
+            #     feature_vals = [value/10 for value in feature_vals]
+            self.fea_num += 1
+            print(f"-----------counting:{self.fea_num}/{n_features}")
+            for feature_val in feature_vals: #从大到小遍历所有特征值
+                data1 = data[data[feature] >= feature_val]['FLAG'] #大于等于特征值后的全部的标签
+                data2 = data[data[feature] < feature_val]['FLAG'] #小于特征值后的全部的标签
+                #print(type(data1))
+                #计算gini指数
+                temp = len(data1)/len(data) 
+                gini = temp * getGini(data1) + \
+                       (1-temp) * getGini(data2) 
+                if gini < best_gini:
+                    best_gini = gini
+                    best_feature = feature
+                    best_feature_val = feature_val
+        self.fea_num = 0
+        return best_feature, best_feature_val, round(best_gini,6) #特征，特征值，基尼指数
+
+
+    def fit(self, data, parent=None):  #创建树
+        #初始化叶节点
+        node = Node(is_leaf=True, #叶节点判断 
+                    classification=1, #分类
+                    attr_split=None, #分类特征
+                    attr_split_value=None, #分类特征值
+                    parent=parent, #父节点
+                    depth=0) #深度
+        if node.parent != None: #判断深度
+            node.depth = node.parent.depth + 1 #如果不是父节点，深度+1
+            print(node.depth)
+        node.samples = data.shape[0] #计算数据行数
+
+        '''
+        most_common()函数
+        ---参数：输入一个可选的n，代表获取数量最多的前n个元素
+        ---返回列表类型，里面是一个个的元组，且（元素，数量）
+        '''
+
+        n_features = data.shape[1] - 1  #得到所有的特征
+        n_classes = len(set(data['FLAG'])) #得到标签分类的长度
+
+        #有数据才能进行分类
+        if(len(data['FLAG']) !=0 ) and n_classes == 1:
+            node.classification = Counter(data['FLAG']).most_common(1)[0][0]  #得到数据FLAG中，出现参数最多的，且返回具体的参数
+        elif (len(data['FLAG']) !=0 ) and n_classes == 2:
+            a,b = Counter(data['FLAG']).most_common(2)
+            if a[0] == 1.0:
+                node.classification = a[0] if a[1] * 3 > b[1] * 2 else b[0]
+            else:
+                node.classification = b[0] if b[1] * 3 > a[1] * 2 else a[0]
+
+
+        '''
+            栈：
+            --概念
+            ---当主函数，调用另一个函数时，当前函数暂停并处于未完成状态
+            --递归
+            ---如果是递归调用栈，需要等到所有函数准备就绪之后，在从最开始基线条件开始，慢慢出栈
+        '''
+
+        """
+        决策树构建
+        --使用递归在栈上进行疯狂的迭代，直到满足基线条件的叶子节点被敲出栈，并赋值为叶子节点
+        --内部节点则直接从递归之后开始运行，对节点各项成员进行赋值，并将他的下级和他连接上
+        --最后等到父节点出现，返回self.tree
+        """
+        #基线条件
+        if n_classes == 1: #如果数据集里面只有一个标签，则该节点为叶节点
+            node.is_leaf = True
+            return node
+        if n_features == 1: #如果特征只剩下1个，则该节点为叶节点
+            node.is_leaf = True
+            return node
+        if node.depth >= 20:
+            node.is_leaf = True
+            return node
+        feature_list = list(data) #得到所有特征
+        feature_list.pop() #去掉最后的标签
+        
+        #递归条件
+        if self.type == 'C4.5':
+            node.attr_split, node.attr_split_value = self.get_C45_best_feature(data)
+            if node.attr_split == -1:
+                node.is_leaf = 1
+                return node
+            node.is_leaf = False
+            best_feature_vals = data[node.attr_split].unique()
+            node.children = {}
+            for val in best_feature_vals:
+                child_node = self.fit(
+                    data[data[node.attr_split] == val].drop([node.attr_split, ], axis=1), parent=node)
+                node.children[val] = child_node
+        
+        #递归条件
+        elif self.type == 'CART':   #执行CART
+            best_feature, best_feature_val, best_gini = self.get_CART_best_feature(data) #得到最好的特征，特征值，基尼系数
+            self.fang += 1
+            print(f"feature：{best_feature}\tfeature_value：{best_feature_val}\tgini：{best_gini}\tcount:{self.fang}")
+
+            if best_gini == 0.0:
+                node.is_leaf = True
+                return node
+
+            '''
+            DataFrame.drop()
+            --参数
+            ---labels：删除行列的名字
+            ---axis：默认为0，指定删除行；为1，执行删除列
+            ---index：直接指定要删除的行
+            ---columns：直接指定要删除的列
+            ---inplace：默认False，不删除原数据，而是返回一个执行删除操作后的新dataframe，True则直接在原数据进行删除操作
+            '''
+            """
+            问题分析
+            ---如果选取的特征值为0，直接得到data1结果，那么data2得到结果为0
+            """
+            data1 = data[data[best_feature] >= best_feature_val].drop([best_feature, ], axis=1)  #选出符合要求的数据集，并删除分类的特征列
+            data2 = data[data[best_feature] < best_feature_val].drop([best_feature, ], axis=1)
+            
+            #递归
+            num = 0
+            if len(data1) != 0:
+                left_child = self.fit(data1, node) #左节点，且数据集里面没有data1的数据
+            else:
+                num += 1
+            #print("下一个节点")
+            if len(data2) != 0:
+                right_child = self.fit(data2, node) #右节点
+            else:
+                num += 2
+            
+            if num == 0:
+                node.is_leaf = False #初始化判断叶节点
+                node.attr_split = '{}:{}'.format(best_feature, best_feature_val) #字典类型{属性：属性值}
+                node.attr_split_value = best_gini #分类属性的值
+                node.children = {} #子节点
+                node.children['yes'] = left_child #字典套娃
+                node.children['no'] = right_child #字典套娃
+            else:
+                node.is_leaf = True
+                return node
+            
+
+        if node.parent == None: #判断父节点
+            self.tree = node #创建新属性得到节点
+        return node #返回节点
+
+    #结果预测
+    def predict(self, X, root=None):
+        if root == None:
+            root = self.tree
+        id_list = []
+        y = []
+
+        '''
+        iterrows()
+        --使用
+        ---for index,row in dataframe.iterrows():
+        --返回
+        ---(行，列)
+        '''
+        for id, x in X.iterrows():
+            node = root
+            while node.is_leaf == False: #判断是否为叶子节点
+                if self.type == 'C4.5':
+                    attr_split = node.attr_split
+                    val = x[attr_split]
+                    if not val in node.children.keys():
+                        break
+                    node = node.children[val]
+                elif self.type == 'CART':
+                    attr = node.attr_split.split(':')[0] #返回特征
+                    attr_val = node.attr_split.split(':')[1] #返回特征值
+                    if float(x[attr]) >= float(attr_val): # 测试样本的特征是否符合要求
+                        node = node.children['yes'] #符合就进入左节点
+                    else:
+                        node = node.children['no'] #反之右节点
+            id_list.append(int(id)) #得到准确的行坐标
+            y.append(node.classification) #得到分类结果
+        df = pd.DataFrame({'predict': y, 'index': id_list}).set_index(['index',], drop=True) #创建dataframe，然后通过index作为索引去显示
+        df.index.name = None #暂时不知道
+        return df #得到测试结果的表格
+
+    def validate(self, data, root=None):
+        if root == None:
+            root = self.tree #默认自己的树
+        X = data.drop(columns=['FLAG',]) #去掉特征
+        y = data[['FLAG']] #特征值
+        y_pred = self.predict(X, root=root) #得到预测结果
+
+        '''
+        pd.concat
+        --参数
+        ---objs:series,dataframe或者是panel构成的序列list
+        ---axis：合并连接的轴，0是行，1是列
+        ---join：连接方式，inner，取交集；outer，取并集
+        --返回值
+        ---dataframe
+        '''
+        y_cmp = pd.concat([y_pred, y], axis=1, join='inner') #把得到的结果全部拼接起来
+
+        y_cmp['cmp'] = y_cmp.apply(lambda x: x['FLAG'] == x['predict'], axis=1) #生成一列标签和预测的比较
+        
+        '''
+        series.mean()
+        --参数
+        ---axis：应用的轴
+        ---skipna：计算结果时排除NA/null值
+        ---level：如果轴是分层，则沿特定级别计数，并折叠称标量
+        ---numeric_only:仅包括float，int，boolean列。
+        ---**kwargs:要传递给函数的其他关键字参数。
+        '''
+        acc = y_cmp['cmp'].mean() #计算平均值
+        return acc
+    
+    #修剪之后的树叶
+    def copy_tree(self, node=None, parent=None):
+        if node == None:
+            node = self.tree
+        
+        new_node = Node(
+            is_leaf=node.is_leaf,
+            classification=node.classification,
+            attr_split=node.attr_split,
+            attr_split_value=node.attr_split_value,
+            parent=parent,
+            children =node.children,
+            depth=node.depth,
+            samples=node.samples,
+            gt=node.gt
+        )
+
+        if node.is_leaf:
+            return new_node
+        else:
+            for val, child_node in node.children.items():
+                new_child_node = self.copy_tree(child_node, new_node)
+                new_node.children[val] = new_child_node
+            return new_node
+
+    def update_gt(self, data, root=None):
+        if root == None:
+            root = self.tree
+        alpha = 1
+        if root.is_leaf == False:
+            t = self.get_num_leaves(root)
+            if t*data.shape[0] != 0:
+                c1 = 1 - data[data['FLAG'] == root.classification].shape[0] / data.shape[0]
+                c2 = 1 - self.validate(data, root)
+                root.gt = (c1 - c2) / t
+            else:
+                print(f"t:{t}\tdata.shqpe[0]:{data.shape[0]}")
+                return 1
+
+            if root.gt < alpha:
+                alpha = root.gt
+                # print('smaller: {}'.format(alpha))
+            attr_split = root.attr_split.split(':')[0]
+            val_split = root.attr_split.split(':')[1]
+            child1 = root.children['yes']
+            child2 = root.children['no']
+            data1 = data[data[attr_split] == val_split].drop([attr_split, ], axis=1)
+            data2 = data[data[attr_split] != val_split]
+
+            alpha1 = self.update_gt(data1, child1)
+            alpha2 = self.update_gt(data2, child2)
+            alpha = min(alpha, alpha1)
+            alpha = min(alpha, alpha2)
+            return alpha
+        else:
+            return 1
+
+    def prune_cart(self, train, valid=None):#修剪树
+        best_tree = self.copy_tree(self.tree)
+        best_tree_validation = self.validate(valid, self.tree)
+        root = self.copy_tree(self.tree)
+
+        flag = True
+        while flag:
+            alpha = self.update_gt(train, root)
+            node_stack = []
+            node_stack.append(root)
+
+            while len(node_stack) > 0:
+                node = node_stack[-1]
+                node_stack.pop()
+                if not node.is_leaf:
+                    if node.gt == alpha:
+                        node.is_leaf = True
+                    else:
+                        for _, child_node in node.children.items():
+                            node_stack.append(child_node)
+            validation = self.validate(valid, root)
+
+            if validation > best_tree_validation:
+                best_tree = self.copy_tree(root)
+                best_tree_validation = validation
+                print('update, validation: {}, T: {}'.format(validation, self.get_num_leaves(best_tree)))
+                plotTree.CART_Tree(self.to_dict(best_tree), 'valid{}.png'.format(best_tree_validation))
+            if root.is_leaf:
+                flag = False
+        return best_tree
+
+    def prune_algo4_5(self, data, alpha=5, node=None):
+        if node == None:
+            node = self.tree
+        # print("entering node {}, depth={}, num_children={}".format(node.attr_split, node.depth, len(node.children)))
+        new_node = Node(
+            is_leaf=node.is_leaf,
+            classification=node.classification,
+            attr_split=node.attr_split,
+            attr_split_value=node.attr_split_value,
+            parent=node.parent,
+            depth=node.depth,
+        )
+        new_node.samples = node.samples
+        new_node.children = node.children
+        if node.is_leaf:
+            return new_node
+
+        for val, child_node in node.children.items():
+            new_child = self.prune_algo4_5(data, alpha, child_node)
+            new_node.children[val] = new_child
+
+        prune_flag = True
+        for child_node in node.children.values():
+            if child_node.is_leaf == False:
+                prune_flag = False
+        if prune_flag:
+            loss1 = 0
+            for child_node in node.children.values():
+                loss1 += child_node.samples * self.get_emp_ent(child_node, data)
+            loss2 = node.samples * self.get_emp_ent(node, data)
+            if loss1 + len(node.children.values()) * alpha > loss2 + alpha:
+                new_node.is_leaf = True
+        return new_node
+
+    def prune_depth(self, node, depth):
+        if node.depth == depth:
+            # print("PRUNE: node {}, depth={}".format(node.attr_split, node.depth))
+            node.is_leaf = True
+        elif node.depth < depth:
+            for val, child_node in node.children.items():
+                self.prune_depth(child_node, depth)
+
+    def prune_samples(self, node, samples):
+        if node.samples < samples:
+            # print("PRUNE: node {}, samples={}".format(node.attr_split, node.samples))
+            node.is_leaf = True
+        else:
+            # print("entering node samples={}".format(node.samples))
+            for val, child_node in node.children.items():
+                self.prune_samples(child_node, samples)
+
+    def to_dict(self, node=None):
+        if node == None:
+            node = self.tree
+        dict = {node.attr_split: {}}
+        for val, child_node in node.children.items():
+                if child_node.is_leaf == True:
+                    dict[node.attr_split][val] = child_node.classification
+                else:
+                    dict[node.attr_split][val] = self.to_dict(child_node)
+        return dict
