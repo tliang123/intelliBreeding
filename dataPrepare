@@ -1,0 +1,28 @@
+data = pd.read_csv("train.csv")  #读取数据
+data = data.fillna(0)
+data1 = data[data["FLAG"] == 1.0]
+data2 = data[data["FLAG"] == 0.0]
+data2 = data2.sample(frac=1) 
+data2 = data2[0:820]
+data = pd.concat([data1,data2])
+print(data)
+
+data = data.sample(frac=1)
+
+#遍历
+list_df = pd.read_csv("制造业.csv")
+# list_ = list(list_df["制造业指标名称"])
+list_ = list(list_df["制造业所属行业"])
+list_.insert(0,'DELTA_1')
+list_.insert(1,'DELTA_2')
+list_.insert(2,'BASIC_EPS')
+# print(len(list_))
+n_features = data.shape[1] - 1 #所有特征 = 所有列的数量-1（标签列）
+data3 = copy.deepcopy(data)
+for i in range(n_features):
+    feature = list(data)[i] #得到相应的特征
+    if feature == 'FLAG': #如果特征等于标签，继续 
+        continue
+    if feature not in list_:
+        data3 = data3.drop([feature,],axis=1)
+data = data3
